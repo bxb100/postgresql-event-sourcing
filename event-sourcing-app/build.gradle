@@ -46,7 +46,19 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+import org.apache.tools.ant.taskdefs.condition.Os
+
 jib {
     to.image = "eugene-khyst/postgresql-event-sourcing:${project.version}"
-    from.image = "eclipse-temurin:21-jre"
+    from {
+        image = "eclipse-temurin:21-jre"
+        if (Os.isArch('aarch64')) {
+            platforms {
+                platform {
+                    architecture = 'arm64'
+                    os = 'linux'
+                }
+            }
+        }
+    }
 }

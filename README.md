@@ -1,5 +1,7 @@
 # <a id="0"></a>Event Sourcing with PostgreSQL
 
+<p align="right"><a href="README-CN.md">中文</a> / <a href="README.md">English</a></p>
+
 - [Introduction](#1)
 - [Example domain](#2)
 - [Event sourcing and CQRS basics](#3)
@@ -67,7 +69,7 @@ But PostgreSQL, the world's most advanced open-source database, is also suitable
 You can use PostgreSQL as an event store without additional frameworks or extensions
 instead of setting up and maintaining a separate specialized database for event sourcing.
 
-This repository provides a reference implementation of an event-sourced system 
+This repository provides a reference implementation of an event-sourced system
 that uses PostgreSQL as an event store built with Spring Boot.
 [Fork](https://github.com/eugene-khyst/postgresql-event-sourcing/fork) the repository and use it as a template for your projects.
 Or clone the repository and run end-to-end tests to see how everything works together.
@@ -393,7 +395,7 @@ and processes them:
 
 #### <a id="4-7-1"></a>Transactional outbox using transaction ID
 
-Using only the event ID to track events processed by the subscription is unreliable 
+Using only the event ID to track events processed by the subscription is unreliable
 and can result in lost events.
 
 The `ID` column of the `ES_EVENT` table is of type `BIGSERIAL`.
@@ -401,7 +403,7 @@ It's a notational convenience for creating ID columns having their default value
 
 PostgreSQL sequences can't be rolled back.
 `SELECT nextval('ES_EVENT_ID_SEQ')` increments and returns the sequence value.
-Even if the transaction is not yet committed, the new sequence value becomes visible to other transactions. 
+Even if the transaction is not yet committed, the new sequence value becomes visible to other transactions.
 
 If transaction #2 started after transaction #1 but committed first,
 the event subscription processor can read the events created by transaction #2, update the last processed event ID,
@@ -415,10 +417,10 @@ Each event is supplemented with the current transaction ID.
 `pg_current_xact_id()` returns the current transaction's ID of type `xid8`.
 `xid8` values increase strictly monotonically and cannot be reused in the lifetime of a database cluster.
 
-The latest event that is "safe" to process is right before the `xmin` of the current snapshot. 
+The latest event that is "safe" to process is right before the `xmin` of the current snapshot.
 `pg_current_snapshot()` returns a current snapshot, a data structure showing which transaction IDs are now in-progress.
 `pg_snapshot_xmin(pg_snapshot)` returns the `xmin` of a snapshot.
-`xmin` is the lowest transaction ID that was still active. 
+`xmin` is the lowest transaction ID that was still active.
 All transaction IDs less than `xmin` are either committed and visible, or rolled back.
 
 Even if transaction #2 started after transaction #1 and committed first,
@@ -426,14 +428,14 @@ the events it created won't be read by the event subscription processor until tr
 
 ![PostgreSQL reliable transactional outbox using transaction ID](img/postgresql-reliable-outbox.svg)
 
-> **NOTE**  
+> **NOTE**
 > The transaction ID solution is used by default as it is non-blocking.
 
 #### <a id="4-7-2"></a>Transactional outbox using table-level lock
 
 With the transaction ID solution, event subscription processor doesn't wait for in-progress transactions to complete.
-Events created by already committed transactions will not be available for processing 
-while transactions started earlier are still in-progress. 
+Events created by already committed transactions will not be available for processing
+while transactions started earlier are still in-progress.
 These events will be processed immediately after these earlier transactions have completed.
 
 An alternative solution is to use PostgreSQL explicit locking to make event subscription processor wait for in-progress transactions.
@@ -449,13 +451,13 @@ Events are created with the command `INSERT INTO ES_EVENT...` that acquires the 
 `ROW EXCLUSIVE (RowExclusiveLock)` lock mode is acquired by any command that modifies data in a table.
 
 The command `LOCK ES_EVENT IN SHARE ROW EXCLUSIVE MODE` acquires the `SHARE ROW EXCLUSIVE` lock mode on `ES_EVENT` table.
-`SHARE ROW EXCLUSIVE (ShareRowExclusiveLock)` mode protects a table against concurrent data changes, 
-and is self-exclusive so that only one session can hold it at a time. 
+`SHARE ROW EXCLUSIVE (ShareRowExclusiveLock)` mode protects a table against concurrent data changes,
+and is self-exclusive so that only one session can hold it at a time.
 
 `SHARE ROW EXCLUSIVE` lock must be acquired in a separate transaction (`Propagation.REQUIRES_NEW`).
 The transaction must contain only this command and commit quickly to release the lock, so writes can resume.
 
-When the lock is acquired and released, it means 
+When the lock is acquired and released, it means
 that there are no more uncommitted writes with an ID less than or equal to the ID returned by `pg_sequence_last_value`.
 
 ![PostgreSQL reliable transactional outbox using table-level lock](img/postgresql-reliable-outbox-with-lock.svg)
@@ -463,7 +465,7 @@ that there are no more uncommitted writes with an ID less than or equal to the I
 #### <a id="4-7-3"></a>Database polling
 
 To get new events from the `ES_EVENT` table, the application has to poll the database.
-The shorter the polling period, the shorter the delay between persisting a new event and processing it by the subscription. 
+The shorter the polling period, the shorter the delay between persisting a new event and processing it by the subscription.
 But the lag is inevitable. If the polling period is 1 second, then the lag is at most 1 second.
 
 The polling mechanism implementation [ScheduledEventSubscriptionProcessor](src/main/java/com/example/eventsourcing/service/ScheduledEventSubscriptionProcessor.java)
@@ -481,29 +483,29 @@ event-sourcing:
 
 #### <a id="4-7-4"></a>Listen/Notify as an alternative to database polling
 
-To reduce the lag associated with database polling, the polling period can be set to a very low value, 
+To reduce the lag associated with database polling, the polling period can be set to a very low value,
 such as 1 second.
-But this means that there will be 3600 database queries per hour and 86400 per day, even if there are no new events. 
+But this means that there will be 3600 database queries per hour and 86400 per day, even if there are no new events.
 
 PostgreSQL `LISTEN` and `NOTIFY` feature can be used instead of polling.
 This mechanism allows for sending asynchronous notifications across database connections.
-Notifications are not sent directly from the application, 
+Notifications are not sent directly from the application,
 but via the database [trigger](src/main/resources/db/migration/V2__notify_trigger.sql) on a table.
 
-To use this functionality an unshared [PgConnection](https://jdbc.postgresql.org/documentation/publicapi/org/postgresql/jdbc/PgConnection.html) 
+To use this functionality an unshared [PgConnection](https://jdbc.postgresql.org/documentation/publicapi/org/postgresql/jdbc/PgConnection.html)
 which remains open is required.
-The long-lived dedicated JDBC `Connection` for receiving notifications has to be created using the `DriverManager` API, 
+The long-lived dedicated JDBC `Connection` for receiving notifications has to be created using the `DriverManager` API,
 instead of getting from a pooled `DataSource`.
 
-PostgreSQL JDBC driver can't receive asynchronous notifications 
-and must poll the backend to check if any notifications were issued. 
-A timeout can be given to the poll function `getNotifications(int timeoutMillis)`, 
+PostgreSQL JDBC driver can't receive asynchronous notifications
+and must poll the backend to check if any notifications were issued.
+A timeout can be given to the poll function `getNotifications(int timeoutMillis)`,
 but then the execution of statements from other threads will block.
-When `timeoutMillis` = 0, blocks forever or until at least one notification has been received. 
+When `timeoutMillis` = 0, blocks forever or until at least one notification has been received.
 It means that notification is delivered almost immediately, without a lag.
 If more than one notification is about to be received, these will be returned in one batch.
 
-This solution  significantly reduces the number of issued queries 
+This solution  significantly reduces the number of issued queries
 and also solves the lag problem that the polling solution suffers from.
 
 The Listen/Notify mechanism implementation [PostgresChannelEventSubscriptionProcessor](src/main/java/com/example/eventsourcing/service/PostgresChannelEventSubscriptionProcessor.java)
@@ -516,15 +518,15 @@ event-sourcing:
   subscriptions: postgres-channel # Enable Listen/Notify event subscription processing
 ```
 
-> **NOTE**  
+> **NOTE**
 > The Listen/Notify mechanism is used by default as it is more efficient.
 
 ### <a id="4-8"></a>Adding new asynchronous event handlers
 
-After restarting the backend, existing subscriptions will only process new events after the last processed event 
+After restarting the backend, existing subscriptions will only process new events after the last processed event
 and not everything from the first one.
 
-> **WARNING**  
+> **WARNING**
 > Critical content demanding immediate user attention due to potential risks.
 New subscriptions (event handlers) in the first poll will read and process all events.
 Be careful, if there are too many events, they may take a long time to process.
@@ -533,8 +535,8 @@ Be careful, if there are too many events, they may take a long time to process.
 
 Using PostgreSQL as an event store has a lot of advantages, but there are also drawbacks.
 
-1. **Asynchronous event handlers can process the same event more than once.** 
-   It might crash after processing an event but before recording the fact that it has done so. 
+1. **Asynchronous event handlers can process the same event more than once.**
+   It might crash after processing an event but before recording the fact that it has done so.
    When it restarts, it will then process the same event again (e.g., send an integration event).
    Integration events are delivered with **at-least-once** delivery guarantee.
    The exactly-once delivery guarantee is hard to achieve due to a dual-write.
@@ -542,11 +544,11 @@ Using PostgreSQL as an event store has a lot of advantages, but there are also d
    without two-phase commit (2PC).
    Consumers of integration events should be idempotent and filter duplicates and unordered events.
 2. The asynchronous event handling results in the **eventual consistency between the write model and sent integration events**.
-   The polling database table for new events with a fixed delay introduces a full consistency lag 
+   The polling database table for new events with a fixed delay introduces a full consistency lag
    greater than or equal to the interval between polls (1 second by default).
-3. **A long-running transaction in the same database will effectively "pause" all event handlers.** 
+3. **A long-running transaction in the same database will effectively "pause" all event handlers.**
    `pg_snapshot_xmin(pg_snapshot)` will return the ID of this long-running transaction
-   and events created by all later transactions will be read by the event subscription processor 
+   and events created by all later transactions will be read by the event subscription processor
    only after this long-running transaction is committed.
 
 ## <a id="5"></a>Project structure
@@ -622,7 +624,7 @@ No changes to `postgresql-event-sourcing-core` subproject are required.
     ```bash
     docker compose logs -f event-sourcing-app
     ```
-   
+
 7. Run E2E tests and see the output
     ```bash
     E2E_TESTING=true ./gradlew clean test -i
@@ -630,7 +632,7 @@ No changes to `postgresql-event-sourcing-core` subproject are required.
 
 8. Explore the database using the Adminer database management tool at http://localhost:8181.
    Find the database name, user, and password in the [docker-compose.yml](docker-compose.yml).
-   
+
 You can also manually call the REST API endpoints.
 
 1. Install [curl](https://curl.se/) and [jq](https://stedolan.github.io/jq/)
